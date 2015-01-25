@@ -1,0 +1,80 @@
+# Practical Machine Learning Course Assignment
+
+## Data Loading and Filtering
+First of all we load necessary libraries:
+```{r, message=FALSE}
+library(caret)
+library(ggplot2)
+```
+```{r, echo=FALSE}
+setwd("C:\\Workspace\\r\\08 - Practical Machine Learning")
+```
+Then loading data and set random seed:
+```{r}
+set.seed("51423")
+raw.train.data <- read.csv("pml-training.csv", na.strings=c("NA",""))
+raw.test.data <- read.csv("pml-testing.csv", na.strings=c("NA",""))
+```
+We plot distribution diagram of number of cases for each class to be sure that our data is roughly unbiased and we need no additional balancing procedure.
+
+```{r, echo=FALSE}
+class.hist.plot <- ggplot(raw.train.data, aes(x=classe)) + 
+    geom_histogram(colour="black", fill="steelblue")
+class.hist.plot
+```
+
+Most of data in dataset consist of NA's and blank values, so for dealing with that we simply remove all the features (columns) with more than 60% of missing values. Also we remove some fields which contain useless data for modeling - name of test user, timestamp, etc. So for doing all that we develop filter function *filter.columns*
+```{r}
+nas.counter <- sapply(raw.train.data, function(x) sum(is.na(x)))
+nas.columns <- nas.counter / nrow(raw.train.data) > .4
+
+filter.columns <- function(df) {
+    df <- df[!nas.columns]
+    df <- subset(df, select=-c(X, user_name, raw_timestamp_part_1, 
+                               raw_timestamp_part_2, cvtd_timestamp, 
+                               new_window, num_window))
+    return (df)
+}
+
+train.data <- filter.columns(raw.train.data)
+test.data <- filter.columns(raw.test.data)
+```
+So now our data has 53 features (including one for class variable) opposite to initial amount of 160.  
+After that we create validation dataset - a small set of data, which won't be using for modeling. This data we'll use for estimating out-of-sample error before making predictions.
+```{r}
+train.ind <- createDataPartition(y=train.data$classe, p=0.85, list = FALSE)
+
+train.data <- train.data[train.ind,]
+val.data <- train.data[-train.ind,]
+```
+Our final datasets for modeling are (number of samples - number of features):
+```{r}
+dim(train.data) # Data for training model
+dim(val.data)   # Data for validating model
+dim(test.data)  # Data for making prediction
+```
+
+## Modeling and Error Estimation
+So far as present submission is for studying more than battle-for-accuracy, I decide to use simple CART model (from *rpart* package). We perform training procedure using 20-folds cross-validation. Also we use 10 iterations for choosing optimal model via tuning parameters. 
+
+*Note: Unfortunately I have a very slow and old computer, which computates even simple kNN model more than 9 hours, so for me no is no option to use one of progressive methods for now. Hope you'll put it into account.*
+```{r,cache=TRUE, cache.lazy=TRUE, message=FALSE}
+train.ctrl <- trainControl(method="cv", number = 20)
+model.rpart <- train(classe ~ ., data = train.data, method="rpart", 
+                     trControl=train.ctrl, tuneLength=10)
+```
+
+For estimating error we use previously created validation dataset. 
+```{r}
+val.pred <- predict(model.rpart, newdata = val.data)
+confusionMatrix(val.pred, val.data$classe)
+```
+So our estimation of out-of-sample error is 68% with 95% confidence interval (66%, 70%).
+Further improvements can performed with using more progressive methods such as GBMs, RandomForest, etc or more progressive feature engineering.
+
+## Predicting classes of new data
+```{r}
+test.pred <- predict(model.rpart, newdata = test.data)
+report <- data.frame(problem_id=test.data$problem_id, predicted_class=test.pred)
+report
+```
